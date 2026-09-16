@@ -15,6 +15,7 @@ one over the committed fixtures — a page cannot tell the difference, and
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 
 import pytest
@@ -37,10 +38,10 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 #: Every page, so "does each one render?" is one parametrisation rather than four copies.
 PAGES = ("overview", "analytics", "data_quality", "insights")
 
-OVERVIEW = "mdq.dashboard.pages.overview"
-ANALYTICS = "mdq.dashboard.pages.analytics"
-DATA_QUALITY = "mdq.dashboard.pages.data_quality"
-INSIGHTS = "mdq.dashboard.pages.insights"
+OVERVIEW = "mdq.dashboard.views.overview"
+ANALYTICS = "mdq.dashboard.views.analytics"
+DATA_QUALITY = "mdq.dashboard.views.data_quality"
+INSIGHTS = "mdq.dashboard.views.insights"
 SIDEBAR = "mdq.dashboard.sidebar"
 SHELL = "mdq.dashboard.shell"
 
@@ -83,6 +84,19 @@ def _text(app: AppTest) -> str:
     return "\n".join(str(part) for part in parts)
 
 
+def _plates(text: str) -> dict[str, str]:
+    """The stamped state plates, read back off the page as {state: count}.
+
+    Asserted through the rendered markup rather than through `st.metric` because the
+    dashboard has no metric tiles: a severity is stamped with its name and its hatch so it
+    never depends on colour alone, and that is the thing worth protecting from regression.
+    """
+    found = re.findall(
+        r'mdq-plate-count">([^<]+)</span><span class="mdq-plate-name">([^<]+)<', text
+    )
+    return {name: count for count, name in found}
+
+
 # --------------------------------------------------------------------------- #
 # every page renders
 # --------------------------------------------------------------------------- #
@@ -90,7 +104,7 @@ def _text(app: AppTest) -> str:
 
 @pytest.mark.parametrize("name", PAGES)
 def test_every_page_renders_without_raising(name: str, loaded: Backend) -> None:
-    app = page_test(f"mdq.dashboard.pages.{name}", loaded)
+    app = page_test(f"mdq.dashboard.views.{name}", loaded)
     assert not app.exception, app.exception
     assert app.title, f"{name} drew no title"
 
@@ -99,17 +113,28 @@ def test_every_page_renders_without_raising(name: str, loaded: Backend) -> None:
 def test_every_page_has_an_empty_state_rather_than_a_blank_screen(
     name: str, empty: Backend
 ) -> None:
-    """With nothing loaded, every page must say so — and say what to do about it."""
-    app = page_test(f"mdq.dashboard.pages.{name}", empty)
+    """With nothing loaded, every page must say so — and say what to do about it.
+
+    The empty state is a stamped plate and a dashed-out schedule rather than an alert
+    banner, because the confirmed audience clones this repository and runs it, and
+    `make fetch` is optional: this is very likely the first screen anyone sees, and it has
+    to read as a certificate with nothing on record rather than as a failure.
+    """
+    app = page_test(f"mdq.dashboard.views.{name}", empty)
     assert not app.exception, app.exception
-    assert any("No market data is loaded" in item.value for item in app.info)
-    assert "make fetch" in _text(app)
+    text = _text(app)
+    assert _plates(text) == {"No data on record": "—"}, f"{name} drew no empty-state plate"
+    assert "Findings on record" in text
+    assert "make fetch" in text
+    # The test-suite credential is a fact about the golden tests, not about the loaded
+    # data, so it must not print beside INSTRUMENTS 0.
+    assert "40/40 daily files" not in text
 
 
 @pytest.mark.parametrize("name", PAGES)
 def test_every_page_turns_a_dead_backend_into_a_sentence(name: str) -> None:
     """The API being down must read as an explanation, never as a traceback."""
-    app = page_test(f"mdq.dashboard.pages.{name}", FailingBackend())
+    app = page_test(f"mdq.dashboard.views.{name}", FailingBackend())
     assert not app.exception, app.exception
     assert app.error, f"{name} showed nothing when the backend failed"
     assert "not answering" in app.error[0].value
@@ -122,11 +147,13 @@ def test_every_page_turns_a_dead_backend_into_a_sentence(name: str) -> None:
 
 def test_overview_leads_with_the_triage_not_with_the_raw_total(loaded: Backend) -> None:
     app = page_test(OVERVIEW, loaded)
-    labels = {item.label: item.value for item in app.metric}
-    assert labels["Errors"] == "0"
-    assert labels["Warnings"] == "6"
-    assert labels["Expected"] == "2,096"
-    assert "need a human" in _text(app)
+    text = _text(app)
+    # The schedule states the figure and the total it was measured against, together: a
+    # bare "6" would ask a reader who has never seen this tool to take it on trust.
+    assert "Requiring review" in text
+    assert "of 2,102 findings" in text
+    assert "need a human" in text
+    assert _plates(text) == {"Error": "0", "Warning": "6", "Expected": "2,096"}
 
 
 def test_overview_draws_the_check_chart_and_the_activity_heatmap(loaded: Backend) -> None:
@@ -186,7 +213,11 @@ def test_analytics_says_so_when_an_instrument_has_no_minute_bars(loaded: Backend
 def test_data_quality_hides_the_expected_findings_and_says_how_many(loaded: Backend) -> None:
     app = page_test(DATA_QUALITY, loaded)
     assert app.checkbox[0].value is False
-    assert any("2,096 further finding(s) are hidden" in item.value for item in app.info)
+    # In the traceability band, not an alert: it is the table's standing scope rather than
+    # something that just happened.
+    text = _text(app)
+    assert "2,096 further finding(s) are hidden" in text
+    assert "Excluded from this table" in text
     assert "Showing 6 finding(s)" in _text(app)
 
 
@@ -261,7 +292,10 @@ def test_an_uploaded_file_reports_its_rejects_and_its_findings(loaded: Backend) 
     assert not app.exception, app.exception
     text = _text(app)
     assert "could not be placed on the timeline" in text
-    assert "Rows that became bars" in {item.label for item in app.metric}
+    # The upload report states rows-out against rows-in, and marks itself out of tolerance
+    # because this fixture has rows that could not be placed at all.
+    assert "Rows that became bars" in text
+    assert "mdq-bar-fill is-fail" in text
 
 
 def test_a_clean_upload_says_there_is_nothing_wrong_with_it(loaded: Backend) -> None:

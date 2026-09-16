@@ -26,7 +26,7 @@ import polars as pl
 import streamlit as st
 
 from mdq.api.schemas import FindingsResponse, QualitySummaryResponse
-from mdq.dashboard import cache, charts, ui
+from mdq.dashboard import cache, certificate, charts, ui
 from mdq.dashboard.backend import (
     DEFAULT_MIN_SEVERITY,
     FINDINGS_PAGE,
@@ -54,22 +54,23 @@ _TABLE_COLUMNS = (
 
 def render(backend: Backend) -> None:
     """Draw the Data Quality page."""
+    summary = ui.guard(lambda: cache.summary(backend), context="Could not read what is loaded.")
+    if summary is None:
+        return
+    ui.certificate_head(summary, "Data quality", 3)
     st.title("Data quality")
     st.caption(
         "Every defect the checks found, worst first. Findings the activity model explained "
         "as normal market behaviour are counted but hidden until you ask for them."
     )
-
-    summary = ui.guard(lambda: cache.summary(backend), context="Could not read what is loaded.")
-    if summary is None:
-        return
     if not summary.by_frequency:
         ui.nothing_loaded()
+        ui.signature(backend.label, loaded=False)
         return
 
     frequency = ui.frequency_picker(summary, key="quality_frequency")
     if frequency is Frequency.MINUTE:
-        st.warning(ui.MINUTE_WARNING, icon="⏳")
+        st.warning(ui.MINUTE_WARNING, icon=":material/hourglass_top:")
 
     quality = ui.guard(
         lambda: _quality(backend, frequency), context="Could not run the quality checks."
@@ -77,10 +78,16 @@ def render(backend: Backend) -> None:
     if quality is None:
         return
 
-    include_info, contracts, checks, dates = _filters(quality)
+    include_info, contracts, checks, dates = _filters(quality, ui.session_span(summary))
     triage = severity_triage(quality.findings_by_severity)
+    # The three tiers stay on screen while the filters move, so a reader who narrows to one
+    # instrument can still see what share of the whole they are looking at.
+    certificate.render_plates(ui.severity_plates(triage, quality.thresholds))
     if not include_info:
-        st.info(triage.hidden_note, icon=":material/info:")
+        # A persistent statement about what this measurement excludes, so it takes the
+        # traceability band rather than an alert: an alert reads as something that happened,
+        # and nothing happened here — this is the table's standing scope.
+        certificate.render_traceability("Excluded from this table", triage.hidden_note)
 
     response = ui.guard(
         lambda: cache.findings(
@@ -100,6 +107,10 @@ def render(backend: Backend) -> None:
     _table(response)
     st.divider()
     _timeline(response)
+    ui.signature(
+        backend.label,
+        extra=[("Frequency", ui.FREQUENCY_LABELS[frequency] if frequency else "—")],
+    )
 
 
 def _quality(backend: Backend, frequency: Frequency | None) -> QualitySummaryResponse:
@@ -112,6 +123,7 @@ def _quality(backend: Backend, frequency: Frequency | None) -> QualitySummaryRes
 
 def _filters(
     quality: QualitySummaryResponse,
+    span: tuple[date | None, date | None],
 ) -> tuple[bool, list[str], list[str], tuple[date | None, date | None]]:
     """The filter row. Defaults are chosen so the first screen is the useful one."""
     instruments = sorted({str(row["contract"]) for row in quality.by_contract if row["contract"]})
@@ -124,12 +136,27 @@ def _filters(
         format_func=check_title,
         key="quality_checks",
     )
+    first, last = span
     picked = right.date_input(
         "Trading sessions (optional)",
         value=(),
+        # Bounded by the data, not by today. An unbounded picker opens on the current month
+        # and only that month is clickable, so with a corpus ending in March a reader had
+        # to page back through every empty month to reach a session that exists.
+        min_value=first,
+        max_value=last,
+        format=ui.DATE_FORMAT,
         key="quality_dates",
-        help="Leave empty for the whole history. A date range excludes findings that "
-        "belong to no session, such as a malformed input row.",
+        help=(
+            "Day/month/year, and these are Chicago trading sessions. Leave empty for the "
+            "whole history. A date range excludes findings that belong to no session, such "
+            "as a malformed input row."
+            + (
+                f" Loaded sessions run {ui.au_date(first)} to {ui.au_date(last)}."
+                if first and last
+                else ""
+            )
+        ),
     )
     include_info = st.checkbox(
         "Include expected findings (settlement prints, holidays, dormant contracts)",
@@ -170,6 +197,20 @@ def _table(response: FindingsResponse) -> None:
         width="stretch",
         hide_index=True,
         height=min(520, 40 + 36 * frame.height),
+        # `Detail` carries the sentence a reader is actually here for, so the columns whose
+        # values are short give up their slack to it. `Bars affected` is deliberately not
+        # among them: `small` sizes to the *values*, and a 13-character heading over
+        # single-digit counts clips to "Bars affecte" — a narrow column is only narrow when
+        # its heading is short too.
+        column_config={
+            "Severity": st.column_config.TextColumn(width="small"),
+            "Instrument": st.column_config.TextColumn(width="small"),
+            # Day-first, and as a date rather than a datetime: the column is a `pl.Date`,
+            # which Streamlit otherwise renders as "2021-11-11 00:00:00" — a midnight that
+            # means nothing, since a trading session is a day and not an instant.
+            "Session": st.column_config.DateColumn(format=ui.DATE_FORMAT, width="small"),
+            "Detail": st.column_config.TextColumn(width="large"),
+        },
     )
     _evidence(frame)
 

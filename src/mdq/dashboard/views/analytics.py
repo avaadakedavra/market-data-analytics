@@ -27,7 +27,7 @@ import streamlit as st
 
 from mdq.analytics.daily_bars import BAR_COUNT
 from mdq.analytics.vwap import BARS_IN_WINDOW, VWAP
-from mdq.dashboard import cache, charts, ui
+from mdq.dashboard import cache, certificate, charts, ui
 from mdq.dashboard.backend import Backend, reconciliation
 from mdq.domain.frequency import Frequency
 from mdq.domain.schema import C
@@ -41,6 +41,10 @@ _WINDOWS = ("5m", "15m", "30m", "1h")
 
 def render(backend: Backend) -> None:
     """Draw the Analytics page."""
+    summary = ui.guard(lambda: cache.summary(backend), context="Could not read what is loaded.")
+    if summary is None:
+        return
+    ui.certificate_head(summary, "Price analytics", 2)
     st.title("Price analytics")
     st.caption("Daily history for one instrument, and one trading session minute by minute.")
 
@@ -51,6 +55,7 @@ def render(backend: Backend) -> None:
         return
     if not instruments:
         ui.nothing_loaded()
+        ui.signature(backend.label, loaded=False)
         return
 
     codes = [item.contract for item in instruments]
@@ -96,7 +101,10 @@ def _date_range(
         value=(default_start, last),
         min_value=first,
         max_value=last,
+        format=ui.DATE_FORMAT,
         key=f"analytics_dates_{contract}",
+        help="Day/month/year. These are Chicago trading sessions — the session that rolls "
+        f"at 17:00 CT — bounded by {contract}'s own history.",
     )
     if isinstance(picked, date):
         return picked, picked
@@ -124,29 +132,41 @@ def _daily(backend: Backend, contract: str, start: date, end: date) -> None:
         return
     if bars.height == 0:
         st.info(
-            f"No {contract} daily bars between {start} and {end}. Widen the dates, or pick "
-            "another instrument."
+            f"No {contract} daily bars between {ui.au_date(start)} and {ui.au_date(end)}. "
+            "Widen the dates, or pick another instrument."
         )
         return
     ordered = bars.sort(C.SESSION_DATE)
+    st.caption(
+        "Bars as published by the vendor, not rebuilt from minutes — the distinction "
+        "matters, because the vendor's daily close is a settlement price. A hollow candle "
+        "closed up and a filled one closed down; colour on this page means severity."
+    )
     st.plotly_chart(
         charts.candlestick(ordered, contract),
         width="stretch",
         key="analytics_candles",
     )
     traded = ordered.filter(pl.col(C.VOLUME) > 0).height
-    ui.metric_row(
+    # "Sessions that traded" is the figure that decides whether anything else on this page
+    # can be trusted, so it gets the bar: the share of the range that was genuinely active.
+    certificate.render_schedule(
         [
-            ("Sessions", f"{ordered.height:,}", "Daily bars in the selected range."),
-            (
-                "Sessions that traded",
-                f"{traded:,}",
-                "Bars with non-zero volume. The rest are settlement-only prints.",
+            certificate.ScheduleRow(
+                label="Sessions that traded",
+                observed=f"{traded:,}",
+                of_total=f"of {ordered.height:,} sessions",
+                note=(
+                    "Bars with non-zero volume. The rest are settlement-only prints, which "
+                    "are correct data and not defects."
+                ),
+                ratio=traded / ordered.height if ordered.height else None,
             ),
-            (
-                "Total volume",
-                f"{int(ordered.get_column(C.VOLUME).fill_null(0).sum()):,}",
-                "Summed daily volume over the range.",
+            certificate.ScheduleRow(
+                label="Total volume",
+                observed=f"{int(ordered.get_column(C.VOLUME).fill_null(0).sum()):,}",
+                of_total="contracts",
+                note="Summed daily volume over the selected range.",
             ),
         ]
     )
@@ -174,17 +194,31 @@ def _intraday(backend: Backend, contract: str, start: date, end: date) -> None:
         "Trading session",
         sessions,
         index=len(sessions) - 1,
-        format_func=lambda day: f"{day}  ({counts[day]:,} minute bars)",
+        format_func=lambda day: f"{ui.au_date(day)}  ({counts[day]:,} minute bars)",
         key="analytics_session",
     )
-    window = st.select_slider("VWAP window", _WINDOWS, value="15m", key="analytics_window")
+    # A segmented control, not a slider. Four named windows are four discrete choices, and
+    # a slider affords a continuous drag it cannot honour: the handle moves through dead
+    # space and nothing changes until it crosses the next stop, so the control lies about
+    # what it does. `required` keeps a window always selected — deselecting the last option
+    # would hand `None` to the VWAP call.
+    window = st.segmented_control(
+        "VWAP window",
+        _WINDOWS,
+        default="15m",
+        required=True,
+        key="analytics_window",
+        help="The averaging window. A shorter window averages fewer bars, so the thin-window "
+        "count below it rises.",
+    )
 
     if counts[session] < 1_300:
         st.warning(
-            f"{session} holds {counts[session]:,} minute bars; a full CME session is 1,380. "
+            f"{ui.au_date(session)} holds {counts[session]:,} minute bars; a full CME session "
+            "is 1,380. "
             "The average below is computed over what is there, and the strip under the "
             "chart shows where it is thin.",
-            icon="⚠️",
+            icon=":material/warning:",
         )
 
     series = ui.guard(
@@ -193,6 +227,10 @@ def _intraday(backend: Backend, contract: str, start: date, end: date) -> None:
     )
     if series is None:
         return
+    st.caption(
+        f"{ui.au_date(session)} — close against a {window} VWAP, over the bar count each "
+        "window averaged."
+    )
     st.plotly_chart(
         charts.vwap_chart(series, contract, session, window),
         width="stretch",
@@ -200,6 +238,14 @@ def _intraday(backend: Backend, contract: str, start: date, end: date) -> None:
     )
     _thin_note(series)
 
+    st.subheader("Minute coverage per session")
+    st.caption(
+        "How many minute bars each session actually holds. The dotted reference rule is "
+        "1,380 minutes — a full CME session, and the one drawn tolerance limit in this "
+        "dashboard, because it is the one place a real threshold exists. A bar short of it "
+        "is a truncated session, which is invisible in a price chart and fatal to an "
+        "intraday average."
+    )
     st.plotly_chart(charts.coverage_bars(coverage), width="stretch", key="analytics_coverage")
     _reconciliation(backend, contract, session, coverage)
 
@@ -241,6 +287,6 @@ def _reconciliation(backend: Backend, contract: str, session: date, coverage: pl
             derived.to_dicts()[0] if derived.height else None,
         )
         if not rows:
-            st.info(f"No vendor daily bar is loaded for {contract} on {session}.")
+            st.info(f"No vendor daily bar is loaded for {contract} on {ui.au_date(session)}.")
             return
         st.dataframe(rows, width="stretch", hide_index=True)

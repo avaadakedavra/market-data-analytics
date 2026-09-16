@@ -22,13 +22,13 @@ from typing import Final
 
 import streamlit as st
 
-from mdq.dashboard import cache, sidebar
+from mdq.dashboard import cache, sidebar, theme, ui
 from mdq.dashboard.backend import Backend
-from mdq.dashboard.pages import analytics, data_quality, insights, overview
+from mdq.dashboard.views import analytics, data_quality, insights, overview
 
 __all__ = ["TITLE", "pages", "render"]
 
-TITLE: Final = "Market Data Quality & Analytics"
+TITLE: Final = ui.PRODUCT_NAME
 
 
 def pages(backend: Backend) -> list[st.Page]:
@@ -75,8 +75,17 @@ def render(backend: Backend | None = None) -> None:
             fixtures. When omitted, the process-wide backend is built from the command
             line and the environment and cached for every session.
     """
-    st.set_page_config(page_title=TITLE, page_icon="📈", layout="wide")
+    # The sidebar state is left on Streamlit's default, which is the behaviour this app
+    # wants at both ends: expanded at desktop widths, where it holds the uploader and the
+    # empty state's only way forward, and collapsed on a phone, where an expanded sidebar
+    # is a drawer that covers the whole certificate. Forcing it open does the second badly.
+    st.set_page_config(page_title=TITLE, page_icon=":material/verified:", layout="wide")
+    # Before anything draws, so no page ever flashes in Streamlit's own default look.
+    theme.inject()
     chosen = backend if backend is not None else cache.get_backend()
-    navigation = st.navigation(pages(chosen))
+    built = pages(chosen)
+    # Parked so the triage on page one can link straight to the findings on page three.
+    ui.remember_pages(built)
+    navigation = st.navigation(built)
     sidebar.render(chosen)
     navigation.run()

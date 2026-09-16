@@ -3,7 +3,7 @@
 Streamlit pages are the worst place in this codebase to put logic. `AppTest` can only
 assert on rendered widgets, a page cannot be called from a unit test without a script
 runner, and a rerun re-executes the whole file top to bottom. So the pages in
-`mdq.dashboard.pages` are deliberately thin: they pick values out of widgets, hand them to
+`mdq.dashboard.views` are deliberately thin: they pick values out of widgets, hand them to
 a `Backend`, and draw what comes back. Everything that could be *wrong* — which severity a
 findings table defaults to, how a regime profile becomes a heatmap, how a JSON instant
 becomes a Polars timestamp — is here, and is tested directly.

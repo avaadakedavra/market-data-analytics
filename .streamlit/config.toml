@@ -1,0 +1,60 @@
+# Streamlit's own theme, so its native widgets start inside the calibration-certificate
+# world instead of being dragged into it by CSS afterwards. The tokens here are the same
+# values as `mdq.dashboard.theme`, which owns the design and is the place to change them.
+#
+# The three font families are declared here but *supplied* by `theme.py`, which inlines the
+# self-hosted woff2 files as data URIs. That split is deliberate: Streamlit needs the family
+# names to style its own widgets, and inlining the payload means the dashboard renders in
+# its real typography on a machine with no network — which matters, because reviewers clone
+# this and run it themselves.
+
+[theme]
+base = "light"
+
+backgroundColor = "#F2F3EF"          # certificate stock
+secondaryBackgroundColor = "#E7E9E3" # the recessed ply
+textColor = "#1C1C1A"                # graphite ink
+primaryColor = "#23457E"             # the reference standard
+linkColor = "#23457E"
+borderColor = "#9AA09B"
+dataframeBorderColor = "#9AA09B"
+dataframeHeaderBackgroundColor = "#E7E9E3"
+codeBackgroundColor = "#E7E9E3"
+
+font = "Noto Sans, ui-sans-serif, system-ui, sans-serif"
+headingFont = "Noto Sans, ui-sans-serif, system-ui, sans-serif"
+codeFont = "Courier Prime, ui-monospace, SFMono-Regular, monospace"
+
+# Set here rather than in CSS because Streamlit's own heading rules are more specific than
+# an injected stylesheet's, and left alone they render a page heading larger than the
+# document's own title in the certificate head — an inverted hierarchy.
+# h1 is a page of the certificate, h2 a clause, h3 a sub-clause. Nothing outranks the head.
+headingFontSizes = ["1.35rem", "1.05rem", "0.92rem", "0.85rem", "0.8rem", "0.78rem"]
+headingFontWeights = [800, 700, 700, 700, 700, 700]
+
+# A certificate is ruled, not stacked: no rounded containers anywhere.
+baseRadius = "none"
+buttonRadius = "none"
+showWidgetBorder = true
+showSidebarBorder = true
+
+# Streamlit's semantic colours, remapped onto the severity vocabulary so that
+# `st.error`, `st.warning` and `st.info` mean the same three things the findings do.
+# Without this, a stock Streamlit alert would introduce a fourth and fifth meaning
+# for colour on a surface whose whole argument rests on there being only two.
+redColor = "#A62A21"                 # out of tolerance
+redTextColor = "#A62A21"
+orangeColor = "#8C5A10"              # warning
+orangeTextColor = "#8C5A10"
+grayColor = "#75796F"                # an expected artefact
+grayTextColor = "#5A5F58"
+blueColor = "#23457E"
+blueTextColor = "#23457E"
+
+[theme.sidebar]
+backgroundColor = "#E7E9E3"
+borderColor = "#9AA09B"
+baseRadius = "none"
+
+[browser]
+gatherUsageStats = false
