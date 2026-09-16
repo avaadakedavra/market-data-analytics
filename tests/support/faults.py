@@ -548,6 +548,17 @@ class AmbiguousLocalTime:
         ids = tuple(appended.get_column(C.ROW_ID).to_list())
         expected = [
             Expected("ambiguous_local_time", len(ids), ids, Severity.WARNING),
+            # These bars are flat by construction — one price repeated across OHLC, because
+            # the fault cares about the wall clock and not the prices — so the vendor's own
+            # no-range predicate sees them and `stale_bar` reports them. INFO, not WARNING:
+            # volume is non-zero, so `untraded` is false and the regime cannot promote it.
+            #
+            # Declared late. `scripts/measure_metrics.py` measured it as a false positive
+            # and the check turned out to be right: this list was short. It was invisible
+            # because `assert_findings_match` — the only assertion that forbids an
+            # *undeclared* check — is never run against this fault, so the finding had been
+            # appearing inside a passing test. See `docs/EVALUATION.md`.
+            Expected("stale_bar", len(ids), ids, Severity.INFO),
         ]
         if self.passes > 1:
             expected.append(Expected("duplicate_timestamp", len(ids), ids, Severity.INFO))
