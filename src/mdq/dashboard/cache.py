@@ -14,7 +14,7 @@ ticking a checkbox would re-run the quality engine. The numbers say how much tha
 
 So: **everything is cached**, and the sizes of those numbers are why. The minute quality
 pass in particular must never be triggered by an idle click, and a page that is about to
-trigger it says so behind a spinner (`mdq.dashboard.pages.overview`).
+trigger it says so behind a spinner (`mdq.dashboard.views.overview`).
 
 Two mechanisms, chosen deliberately:
 

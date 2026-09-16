@@ -27,7 +27,7 @@ from typing import Any
 import streamlit as st
 
 from mdq.api.schemas import InsightOut, InsightsResponse
-from mdq.dashboard import cache, ui
+from mdq.dashboard import cache, certificate, ui
 from mdq.dashboard.backend import Backend, to_yaml
 from mdq.domain.frequency import Frequency
 
@@ -45,23 +45,24 @@ _KIND_NOTES = {
 
 def render(backend: Backend) -> None:
     """Draw the Insights page."""
+    summary = ui.guard(lambda: cache.summary(backend), context="Could not read what is loaded.")
+    if summary is None:
+        return
+    ui.certificate_head(summary, "Insights", 4)
     st.title("What the defects mean")
     st.caption(
         "Patterns across the whole dataset, each with the evidence behind it and a rule "
         "you can adopt. Derived by explainable rules, not a model — every number below can "
         "be traced back to the findings it came from."
     )
-
-    summary = ui.guard(lambda: cache.summary(backend), context="Could not read what is loaded.")
-    if summary is None:
-        return
     if not summary.by_frequency:
         ui.nothing_loaded()
+        ui.signature(backend.label, loaded=False)
         return
 
     frequency = ui.frequency_picker(summary, key="insights_frequency")
     if frequency is Frequency.MINUTE:
-        st.warning(ui.MINUTE_WARNING, icon="⏳")
+        st.warning(ui.MINUTE_WARNING, icon=":material/hourglass_top:")
 
     response = ui.guard(
         lambda: _insights(backend, frequency), context="Could not derive the insights."
@@ -108,22 +109,29 @@ def _card(insight: InsightOut, *, headline: bool) -> None:
         st.subheader(insight.title)
         st.write(insight.pattern)
 
-        ui.metric_row(
+        # Confidence always means the same thing here — the share of the relevant findings
+        # the pattern accounts for — so it is the one figure on the page that earns a
+        # deviation bar against a drawn scale: two confidences can be compared by eye.
+        certificate.render_schedule(
             [
-                (
-                    "Confidence",
-                    f"{insight.rule.confidence:.0%}",
-                    "Share of the relevant findings this pattern accounts for.",
+                certificate.ScheduleRow(
+                    label="Confidence",
+                    observed=f"{insight.rule.confidence:.0%}",
+                    of_total="of the relevant findings",
+                    note="The share of the relevant findings this pattern accounts for.",
+                    ratio=insight.rule.confidence,
                 ),
-                (
-                    "Findings explained",
-                    f"{insight.finding_count:,}",
-                    "How many individual findings this one pattern covers.",
+                certificate.ScheduleRow(
+                    label="Findings explained",
+                    observed=f"{insight.finding_count:,}",
+                    of_total="findings",
+                    note="How many individual findings this one pattern covers.",
                 ),
-                (
-                    "Instruments",
-                    f"{len(insight.affected_contracts):,}",
-                    "Contracts the pattern touches.",
+                certificate.ScheduleRow(
+                    label="Instruments",
+                    observed=f"{len(insight.affected_contracts):,}",
+                    of_total="contracts",
+                    note="Contracts the pattern touches.",
                 ),
             ]
         )
@@ -138,8 +146,13 @@ def _card(insight: InsightOut, *, headline: bool) -> None:
         st.write(insight.rule.rationale)
         yaml_tab, json_tab = st.tabs(["YAML", "JSON"])
         rule = insight.rule.model_dump(mode="json")
-        yaml_tab.code(to_yaml(rule), language="yaml")
-        json_tab.code(_pretty(rule), language="json")
+        # `wrap_lines` rather than CSS: the highlighter sets `white-space:pre` on the code
+        # element, and overriding that from an injected stylesheet is a specificity fight
+        # against an internal selector that would break on the next upgrade. The rule is
+        # meant to be read and copied, and its `rationale` is a full sentence, so the line
+        # has to wrap.
+        yaml_tab.code(to_yaml(rule), language="yaml", wrap_lines=True)
+        json_tab.code(_pretty(rule), language="json", wrap_lines=True)
 
 
 def _pretty(rule: dict[str, Any]) -> str:

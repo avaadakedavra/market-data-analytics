@@ -4,7 +4,7 @@ UI_PORT ?= 8501
 API_PORT ?= 8000
 API_URL ?= http://127.0.0.1:$(API_PORT)
 
-.PHONY: sync test lint fmt typecheck api ui ui-http dev fetch fixtures
+.PHONY: sync test lint fmt typecheck api ui ui-http dev fetch fixtures sensitivity metrics
 
 sync:  ## Create/refresh the virtualenv from pyproject + uv.lock
 	$(UV) sync
@@ -50,3 +50,15 @@ fetch:  ## Download + checksum-verify the pinned HuggingFace sample into data/ra
 
 fixtures:  ## Regenerate tests/fixtures from data/raw (deterministic, <400 KB)
 	$(UV) run python scripts/make_fixtures.py
+
+sensitivity:  ## Threshold sensitivity sweep -> docs/evaluation/sensitivity.md (data/raw if present, else tests/fixtures; ~5 min on the full corpus)
+	$(UV) run python scripts/sweep_thresholds.py
+
+# Timings are regenerated deliberately, not on every run: `metrics.md` is asserted
+# byte-equal to its generator in `make test`, and a wall clock in the same file would
+# break that assertion every time. `make metrics METRICS_FLAGS=` refreshes only the
+# deterministic half.
+METRICS_FLAGS ?= --benchmarks
+
+metrics:  ## Precision/recall per check -> docs/evaluation/metrics.md, plus benchmarks.md (drop the flag with METRICS_FLAGS=)
+	$(UV) run python scripts/measure_metrics.py $(METRICS_FLAGS)

@@ -45,6 +45,31 @@ Nothing else in the codebase branches on frequency.
 
 ---
 
+## Repository layout
+
+Where each layer of the diagram above actually lives.
+
+```
+src/mdq/
+  domain/     canonical BAR_SCHEMA + FINDING_SCHEMA, Frequency, Severity, config
+  time/       wall-clock -> UTC localisation, session profiles and the 17:00 roll
+  ingest/     readers/ (registry by extension), profiles (data declarations), normalise
+  analytics/  registry, daily_bars, rolling_vwap, filter_bars
+  quality/    registry + runner, activity-regime context, report, cleanse, checks/ (14)
+  insights/   InsightEngine protocol, RuleBasedInsightEngine, rules/ (10)
+  service/    DatasetStore, MarketDataService — the one facade both front ends use
+  api/        FastAPI app, routers, schemas; analytic routes generated from the registry
+  dashboard/  Streamlit shell, Backend protocol (HTTP or embedded), 4 pages, charts
+scripts/      fetch_data.py (pinned + checksummed), make_fixtures.py
+tests/        unit/ (775) property/ (3) golden/ (45) integration/ (104)
+docs/         ARCHITECTURE.md — the diagram, the six extension seams, the decision records
+PLAN.md       the design record, with the measurements that drove each choice
+```
+
+Dependencies point strictly downward; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+---
+
 ## Extension seams
 
 Each of these is "add a file, register, done", with no existing file edited. All four
@@ -301,7 +326,9 @@ which is what turns 388 of 389 gaps into a derived holiday calendar (see the REA
 38 respectively. The risk is real and stated: these are heuristics, and a wrong threshold
 flips a severity. It is mitigated three ways — the numbers are configurable, they travel
 with the report, and the Overview heatmap makes the classification visible per contract
-per month so a user can see the model's judgement rather than trust it.
+per month so a user can see the model's judgement rather than trust it. The sensitivity of
+this split to each threshold is now measured rather than left as a stated risk:
+`docs/EVALUATION.md`, and the sweep behind it, report it per parameter per frequency.
 
 ### ADR-5 — Insights are rule-based, with the LLM as a documented seam
 

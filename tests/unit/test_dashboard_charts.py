@@ -117,7 +117,11 @@ def test_the_candlestick_carries_volume_underneath_it() -> None:
     figure = charts.candlestick(_bars(), "ESH26")
     kinds = [trace.type for trace in figure.data]
     assert kinds == ["candlestick", "bar"]
-    assert figure.data[0].increasing.line.color != figure.data[0].decreasing.line.color
+    # Direction is hollow-versus-filled, not green-versus-red: colour in this dashboard
+    # means severity or the reference standard, and a third meaning would break both.
+    candles = figure.data[0]
+    assert candles.increasing.fillcolor != candles.decreasing.fillcolor
+    assert candles.increasing.line.color == candles.decreasing.line.color
 
 
 def test_the_vwap_chart_breaks_the_line_rather_than_bridging_a_missing_average() -> None:

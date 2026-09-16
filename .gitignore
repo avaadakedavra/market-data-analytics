@@ -35,3 +35,7 @@ uv.lock.bak
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Design-tooling state: review screenshots, the design sidecar and surface briefs.
+# The durable records are committed at the root as DESIGN.md and PRODUCT.md.
+.impeccable/

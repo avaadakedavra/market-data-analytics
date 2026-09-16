@@ -21,7 +21,7 @@ from __future__ import annotations
 import streamlit as st
 
 from mdq.api.schemas import IngestResponse
-from mdq.dashboard import cache, ui
+from mdq.dashboard import cache, certificate, ui
 from mdq.dashboard.backend import Backend, findings_table
 
 __all__ = ["render", "report_card"]
@@ -65,13 +65,23 @@ def report_card(report: IngestResponse) -> None:
     stats = report.ingest
     st.success(f"Loaded {stats.source} as {report.frequency.value} bars.")
     st.caption(f"Stored as dataset `{report.dataset_id}`.")
-    st.metric("Rows that became bars", f"{stats.rows_out:,} of {stats.rows_in:,}")
+    certificate.render_schedule(
+        [
+            certificate.ScheduleRow(
+                label="Rows that became bars",
+                observed=f"{stats.rows_out:,}",
+                of_total=f"of {stats.rows_in:,} rows",
+                ratio=stats.rows_out / stats.rows_in if stats.rows_in else None,
+                failed=stats.rows_rejected > 0,
+            )
+        ]
+    )
 
     if stats.rows_rejected:
         st.warning(
             f"{stats.rows_rejected:,} row(s) could not be placed on the timeline: "
             + ", ".join(f"{count} {reason}" for reason, count in stats.rejects_by_reason.items()),
-            icon="⚠️",
+            icon=":material/warning:",
         )
     if report.rejects:
         with st.expander(f"Rows that could not be used ({len(report.rejects)} shown)"):
